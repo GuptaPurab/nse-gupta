@@ -1,199 +1,101 @@
 import gspread
-
-From oauth2client.service_account import ServiceAccountCredentials
-
+from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
-
 import requests
-
 import zipfile
-
 import io
-
-From datatime import datatime, timedelta
-
+from datetime import datetime, timedelta
 import os
-
 import json
 
-
-
 # 1. Credentials Setup
-
-Creds_json = os.environ.get('GCP_CREDENTIALS')
-
-if not credits_json:
-
+creds_json = os.environ.get('GCP_CREDENTIALS')
+if not creds_json:
     print("CRITICAL: GCP_CREDENTIALS secret missing!")
+    exit(1)
 
-    excit(1)
+creds_dict = json.loads(creds_json)
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
 
-
-
-Creds_dict = json.loads(creds_json)
-
-scope = ["https://spreadsheets.google.com/feeds"," https://www.googleapis.com/auth/drive"]
-
-Creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-
-Client = gspread.authorize(creds)
-
-
-
-# ⁇ ️ Insert your Google Sheet ID here
-
+# 2. Spreadsheet ID Applied
 spreadsheet_id = "11mY5ffeuP3cjRasqn4lVKeLpwTfpJlyEminYE17IdjU"
+worksheet = client.open_by_key(spreadsheet_id).worksheet("Top 250 Stocks")
 
-Worksheet = client.open_by_key(spreadsheet_id).worksheet("Top 250 Stocks")
-
-
-
-# 2. NSE Data Fetcher (TURNOVER LOGIC)
-
+# 3. NSE Data Fetcher (TURNOVER LOGIC)
 def fetch_bhavcopy_for_date(date_obj):
-
     date_str = date_obj.strftime("%Y%m%d")
-
     url = f"https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_{date_str}_F_0000.csv.zip"
-
     
-
-    Headers = {
-
+    headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
     }
     
-    
-
-    tri:
-
+    try:
         response = requests.get(url, headers=headers, timeout=20)
-
         
-
         if response.status_code == 200:
-
-            With zipfile.ZipFile(io.BytesIO(response.content)) as z:
-
+            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
                 csv_filename = z.namelist()[0]
-
-                With z.open(csv_filename) as f:
-
+                with z.open(csv_filename) as f:
                     df = pd.read_csv(f)
-
                     
-
                     df.columns = [c.strip() for c in df.columns]
-
                     
-
-                    Sym_col = next((c for c in ['TckrSymb', 'SYMBOL'] if c in df.columns), none)
-
-                    clos_col = next((c for c in ['ClsPric', 'CLOSE'] if c in df.columns), none)
-
-                    series_col = next((c for c in ['SctySrs', 'SERIES'] if c in df.columns), none)
-
+                    sym_col = next((c for c in ['TckrSymb', 'SYMBOL'] if c in df.columns), None)
+                    close_col = next((c for c in ['ClsPric', 'CLOSE'] if c in df.columns), None)
+                    series_col = next((c for c in ['SctySrs', 'SERIES'] if c in df.columns), None)
                     
-
                     # Column for turnover (TtlTrfVal)
-
-                    turnover_col = next((c for c in ['TtlTrfVal', 'TtlTrdVal', 'TURNOVER_LACS', 'TURNOVER'] if c in df.columns, none)
-
+                    turnover_col = next((c for c in ['TtlTrfVal', 'TtlTrdVal', 'TURNOVER_LACS', 'TURNOVER'] if c in df.columns), None)
                     
-
-                    if not all([sym_col, clos_col, tournover_col]):
-
-                        return none
-
+                    if not all([sym_col, close_col, turnover_col]):
+                        return None
                     
-
                     if series_col:
-
                         df = df[df[series_col].astype(str).str.strip() == 'EQ']
-
                     
-
-                    Filter_keywords = 'BEES|ETF|GOLD|LIQUID'
-
+                    filter_keywords = 'BEES|ETF|GOLD|LIQUID'
                     df = df[~df[sym_col].astype(str).str.contains(filter_keywords, case=False, na=False)]
-
                     
-
-                    df[turnover_col] = pd.to_numeric(df[turnover_col], errors="coerce')
-
+                    df[turnover_col] = pd.to_numeric(df[turnover_col], errors='coerce')
                     df = df.dropna(subset=[turnover_col])
-
                     
-
                     # Top 250 by turnover
-
                     df_top = df.sort_values(by=turnover_col, ascending=False).head(250)
+                    return df_top[[sym_col, turnover_col, close_col]].values.tolist()
+        return None
+    except Exception as e:
+        return None
 
-                    return df_top[[sym_col, tournover_col, clos_col]].values.tolist()
-
-        return none
-
-    Except Exception as e:
-
-        return none
-
-
-
-# 3. Execution Logic (7-Day Lookback)
-
-date = datatime.now()
-
-Data_to_insert = None
-
+# 4. Execution Logic (7-Day Lookback)
+date = datetime.now()
+data_to_insert = None
 fetched_date_str = ""
 
-
-
 for i in range(7): 
-
     test_date = date - timedelta(days=i)
-
-    if test_date.weekday() >= 5: contineue
-
+    if test_date.weekday() >= 5: 
+        continue
         
-
-    Data_to_insert = fetch_bhavcopy_for_date(test_date)
-
+    data_to_insert = fetch_bhavcopy_for_date(test_date)
     
-
     if data_to_insert:
-
         fetched_date_str = test_date.strftime('%d-%b-%Y')
-
         break
 
-
-
-# 4. Update Sheet
-
+# 5. Update Sheet
 if data_to_insert:
-
-    tri:
-
-        worksheet.bach_clear(['A2:C251'])
-
+    try:
+        worksheet.batch_clear(['A2:C251'])
         worksheet.update('A2', data_to_insert)
-
-        ist_now = (datatime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%d-%b %H:%M')
-
+        ist_now = (datetime.utcnow() + timedelta(hours=5, minutes=30)).strftime('%d-%b %H:%M')
         status_msg = f"Data Date: {fetched_date_str} | Last Update: {ist_now} (IST)"
-
         worksheet.update('K2', [[status_msg]])
-
-        Print(f"SUCCESS: Turnover Sheet Updated Successfully for {fetched_date_str}!")
-
-    Except Exception as e:
-
+        print(f"SUCCESS: Turnover Sheet Updated Successfully for {fetched_date_str}!")
+    except Exception as e:
         print(f"Google Sheet Error: {str(e)}")
-
 else:
-
-
-    Print ("FAILED: File not found on any of the last 7 days.")
+    print("FAILED: File not found on any of the last 7 days.")
