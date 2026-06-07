@@ -111,7 +111,7 @@ def fetch_bhavcopy_for_date(date_obj):
 
                     if series_col:
 
-                        df = df[df[series_col].astype(str).str.strip() == ‘EQ’]
+                        df = df[df[series_col].astype(str).str.strip() == 'EQ']
 
                     
 
